@@ -5,32 +5,57 @@
   (:gen-class))
 
 (defn get-text [file-path]
-  (slurp file-path))
+  (let [answer (deref (future (slurp file-path)) 100 :timeout)]
+    (if (= answer :timeout) "" answer)
+    ))
 
 (defn get-text-emails [file-path]
-  (let [text (get-text file-path)]
-  (re-find #"(\S+\@\S+)" text)))
+  (let [text (get-text file-path)
+        f (future (re-find #"(\S+\@\S+)" text))
+        answer (deref f 100 :timeout)]
+    (if (= answer :timeout) "" answer)
+    ))
 
-(defstruct ingraph :file-name :text :emails)
+(defn get-line-count [file-path]
+  (let [text (get-text file-path)
+        lines (string/split text #"\n")]
+    (count lines)))
+
+(defstruct ingraph :file-name :emails)
 
 (defn create-ingraph [file]
   (let [file-name (.toString file)
-        text (get-text file)
         emails (get-text-emails file)]
-    (struct ingraph file-name text emails)))
+    (struct ingraph file-name emails)))
 
-(defn replace-path [str]
-  (string/replace str "/Users/ccrowe/Documents/ingraphs/inmail/" ""))
+(def directory "some-path-to-files")
+
+(defn replace-path [path]
+  (string/replace path (str directory "/") ""))
 
 (defn ingraph-text [ingraph]
   (str (:file-name ingraph) (:emails ingraph) "\n"))
 
+(defn has-email [ingraph]
+  (let [email (:emails ingraph)]
+    (if (= email :timeout) nil email)
+    ))
+
 (defn -main
   [& args]
-  (let [directory "/Users/ccrowe/Documents/ingraphs/inmail"
-        d (io/file directory)
+  (let [d (io/file directory)
         fs (filter #(.isFile %) (file-seq d))
-        ingraphs (map #(create-ingraph %) fs)
-        as-text (map replace-path (map ingraph-text ingraphs))]
+        ingraphs (doall (pmap #(create-ingraph %) fs))
+        with-emails (filter has-email ingraphs)
+        as-text (map replace-path (map ingraph-text with-emails))]
+    (println (count as-text))
     (println as-text)
   ))
+
+                                        ; something I was playing with that didn't pan out
+                                        ;(defn kill-slow-futures [f]
+                                        ;  (Thread/sleep 1)
+                                        ;  (if (not (future-done? f))
+                                        ;    (do
+                                        ;      (println "Cancelling future")
+                                        ;    (future-cancel f))))
